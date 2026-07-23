@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -232,9 +233,71 @@ func (cfg *apiConfig) usersResetHandler(Writer http.ResponseWriter, request *htt
 	}
 }
 
-func (cfg *apiConfig) usersFindAllHandler(Writer http.ResponseWriter, request *http.Request) {
-	
+func (cfg *apiConfig) chirpsFindAllHandler(Writer http.ResponseWriter, request *http.Request) {
+	type chirpsStruct struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		User_id   uuid.UUID `json:"user_id"`
+	}
+	params := []chirpsStruct{}
+	chirps, err := cfg.FindallChirps(request.Context())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	for _, chirp := range chirps {
+		params = append(params, chirpsStruct{
+			ID:        chirp.ID,
+			CreatedAt: chirp.CreatedAt.Time,
+			UpdatedAt: chirp.UpdatedAt.Time,
+			Body:      chirp.Body.String,
+			User_id:   chirp.UserID.UUID,
+		})
+	}
+	Writer.WriteHeader(200)
+	err = json.NewEncoder(Writer).Encode(params)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
 }
+
+func (cfg *apiConfig) chirpsFindByIdHandler(Writer http.ResponseWriter, request *http.Request) {
+	type chirpResponseType struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		User_id   uuid.UUID `json:"user_id"`
+	}
+	requestId := request.PathValue("chirpID")
+	id, err := uuid.Parse(requestId)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	chirp, err := cfg.ChirpsFindById(request.Context(), id)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		Writer.WriteHeader(404)
+		Writer.Write([]byte(nil))
+	} else {
+		chirpResponse := chirpResponseType{
+			ID:        chirp.ID,
+			CreatedAt: chirp.CreatedAt.Time,
+			UpdatedAt: chirp.UpdatedAt.Time,
+			Body:      chirp.Body.String,
+			User_id:   chirp.UserID.UUID,
+		}
+		Writer.WriteHeader(200)
+		err = json.NewEncoder(Writer).Encode(chirpResponse)
+	}
+}
+
 func main() {
 
 	errDotFiles := godotenv.Load()
@@ -249,7 +312,6 @@ func main() {
 		return
 	}
 	dbQueries := database.New(db)
-	fmt.Println(dbQueries)
 	metrics := apiConfig{Queries: dbQueries}
 	const port = ":8080"
 	mux := http.NewServeMux()
@@ -259,6 +321,8 @@ func main() {
 		Handler: mux,
 	}
 
+	mux.HandleFunc("GET /api/chirps/{chirpID}", metrics.chirpsFindByIdHandler)
+	mux.HandleFunc("GET /api/chirps", metrics.chirpsFindAllHandler)
 	mux.HandleFunc("POST /api/login", metrics.usersLoginHandler)
 	mux.HandleFunc("POST /api/users", metrics.usersCreateHandler)
 	mux.HandleFunc("POST /api/chirps", metrics.chirpsPostHandler)
